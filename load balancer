@@ -1,0 +1,57 @@
+# 1. Create a Public IP for the Load Balancer
+resource "azurerm_public_ip" "lb_pip" {
+  name                = "pip-enterprise-lb"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# 2. The Load Balancer Resource
+resource "azurerm_lb" "enterprise_lb" {
+  name                = "lb-enterprise-prod"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "Standard"
+
+  frontend_ip_configuration {
+    name                 = "ip-lb-frontend"
+    public_ip_address_id = azurerm_public_ip.lb_pip.id
+  }
+}
+
+# 3. Backend Address Pool
+resource "azurerm_lb_backend_address_pool" "web_pool" {
+  loadbalancer_id = azurerm_lb.enterprise_lb.id
+  name            = "pool-web-servers"
+}
+
+# 4. Health Probe (The "Heartbeat")
+resource "azurerm_lb_probe" "http_probe" {
+  loadbalancer_id = azurerm_lb.enterprise_lb.id
+  name            = "hp-http-80"
+  protocol        = "Http"
+  port            = 80
+  request_path    = "/"
+}
+
+# 5. Load Balancing Rule
+resource "azurerm_lb_rule" "http_rule" {
+  loadbalancer_id                = azurerm_lb.enterprise_lb.id
+  name                           = "rule-http-80"
+  protocol                       = "Tcp"
+  frontend_port                  = 80
+  backend_port                   = 80
+  frontend_ip_configuration_name = "ip-lb-frontend"
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.web_pool.id]
+  probe_id                       = azurerm_lb_probe.http_probe.id
+}
+
+# 6. Connecting the VMs to the Backend Pool
+# (Assuming your VMs use Network Interfaces named 'web_nic')
+resource "azurerm_network_interface_backend_address_pool_association" "vm_assoc" {
+  count                   = 2
+  network_interface_id    = azurerm_network_interface.web_nic[count.index].id
+  ip_configuration_name   = "internal" # Must match the name in your NIC resource
+  backend_address_pool_id = azurerm_lb_backend_address_pool.web_pool.id
+}
